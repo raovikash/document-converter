@@ -70,7 +70,8 @@ public class DocConverterService {
                             docxRun.setItalic(docRun.isItalic());
                             docxRun.setUnderline(docRun.getUnderlineCode() != 0 ? 
                                 UnderlinePatterns.SINGLE : UnderlinePatterns.NONE);
-                            docxRun.setFontSize(docRun.getFontSize());
+                            // Divide font size by 2 to maintain consistent size between DOC and DOCX
+                            docxRun.setFontSize(docRun.getFontSize() / 2);
                             docxRun.setFontFamily(docRun.getFontName());
                             
                             // Handle text color
