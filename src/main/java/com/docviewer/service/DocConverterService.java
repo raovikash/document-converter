@@ -20,7 +20,7 @@ public class DocConverterService {
     
     private static final Logger logger = LoggerFactory.getLogger(DocConverterService.class);
     private static final Pattern BASE64_PATTERN = Pattern.compile("^[A-Za-z0-9+/]*={0,2}$");
-    private static final int DEFAULT_MARGIN = 10; 
+    private static final int DEFAULT_MARGIN = 100; 
     
     public String convertDocToDocx(String base64Doc) throws IOException {
         // Validate input
@@ -162,9 +162,9 @@ public class DocConverterService {
         // Handle subscript/superscript
         int scriptIndex = docRun.getSubSuperScriptIndex();
         if (scriptIndex == 1) {
-            docxRun.setVerticalAlignment("subscript");
+            docxRun.setVerticalAlignment(VerticalAlign.SUBSCRIPT.toString());
         } else if (scriptIndex == 2) {
-            docxRun.setVerticalAlignment("superscript");
+            docxRun.setVerticalAlignment(VerticalAlign.SUPERSCRIPT.toString());
         }
         
         // Font properties
