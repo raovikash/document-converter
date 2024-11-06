@@ -20,10 +20,7 @@ public class DocConverterService {
     
     private static final Logger logger = LoggerFactory.getLogger(DocConverterService.class);
     private static final Pattern BASE64_PATTERN = Pattern.compile("^[A-Za-z0-9+/]*={0,2}$");
-    private static final int DEFAULT_MARGIN = 1440; // 1 inch in twips
-    private static final int LEFT_MARGIN = 720; // 0.5 inch
-    private static final int RIGHT_MARGIN = 720; // 0.5 inch
-    private static final int HEADING_SPACING = 400; // Spacing for headings
+    private static final int DEFAULT_MARGIN = 100; // 1 inch in twips
     private static final String ARROW_BULLET = "►"; // Arrow bullet point
     
     public String convertDocToDocx(String base64Doc) throws IOException {
@@ -61,11 +58,6 @@ public class DocConverterService {
                         // Set default alignment to left for all paragraphs
                         docxParagraph.setAlignment(ParagraphAlignment.LEFT);
                         
-                        // Handle heading style
-                        if (isHeading(docParagraph)) {
-                            setHeadingStyle(docxParagraph);
-                        }
-                        
                         setParagraphStyle(docParagraph, docxParagraph);
                         
                         // Handle lists and bullet points
@@ -100,10 +92,7 @@ public class DocConverterService {
             sectPr.addNewPgMar();
         
         // Set margins
-        pageMar.setLeft(BigInteger.valueOf(LEFT_MARGIN));
-        pageMar.setRight(BigInteger.valueOf(RIGHT_MARGIN));
-        pageMar.setTop(BigInteger.valueOf(DEFAULT_MARGIN));
-        pageMar.setBottom(BigInteger.valueOf(DEFAULT_MARGIN));
+        pageMar.setRight(BigInteger.valueOf(DEFAULT_MARGIN));
         
         // Set gutter margin to 0
         pageMar.setGutter(BigInteger.ZERO);
@@ -111,27 +100,6 @@ public class DocConverterService {
     
     private boolean startsWithArrow(String text) {
         return text.trim().startsWith("►") || text.trim().startsWith(">");
-    }
-    
-    private boolean isHeading(Paragraph paragraph) {
-        String text = paragraph.text().trim();
-        return text.endsWith(":-") || text.endsWith(":") || 
-               (text.length() > 0 && Character.isUpperCase(text.charAt(0)) && 
-                !text.contains(".") && text.length() < 50);
-    }
-    
-    private void setHeadingStyle(XWPFParagraph paragraph) {
-        paragraph.setSpacingBefore(HEADING_SPACING);
-        paragraph.setSpacingAfter(200);
-        
-        // Set bottom border for headings
-        paragraph.setBorderBottom(Borders.SINGLE);
-        
-        // Create heading run with proper formatting
-        XWPFRun run = paragraph.createRun();
-        run.setBold(true);
-        run.setFontSize(12);
-        run.setFontFamily("Times New Roman");
     }
     
     private void processCharacterRuns(Paragraph docParagraph, XWPFParagraph docxParagraph) {
