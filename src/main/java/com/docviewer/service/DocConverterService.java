@@ -20,10 +20,13 @@ public class DocConverterService {
     
     private static final Logger logger = LoggerFactory.getLogger(DocConverterService.class);
     private static final Pattern BASE64_PATTERN = Pattern.compile("^[A-Za-z0-9+/]*={0,2}$");
-    private static final int DEFAULT_MARGIN = 100; 
+    private static final int DEFAULT_MARGIN = 1440; // 1 inch in twips
+    private static final int LEFT_MARGIN = 720; // 0.5 inch
+    private static final int RIGHT_MARGIN = 720; // 0.5 inch
+    private static final int HEADING_SPACING = 400; // Spacing for headings
+    private static final String ARROW_BULLET = "►"; // Arrow bullet point
     
     public String convertDocToDocx(String base64Doc) throws IOException {
-        // Validate input
         if (base64Doc == null || base64Doc.trim().isEmpty()) {
             throw new IllegalArgumentException("Base64 input cannot be null or empty");
         }
@@ -44,39 +47,34 @@ public class DocConverterService {
                  ByteArrayOutputStream docxOutputStream = new ByteArrayOutputStream()) {
                 
                 XWPFDocument docx = new XWPFDocument();
-                
-                // Set document margins
                 setDocumentMargins(docx);
                 
                 Range range = doc.getRange();
                 
-                // Process sections for page layout
                 for (int sectionIdx = 0; sectionIdx < range.numSections(); sectionIdx++) {
                     Section section = range.getSection(sectionIdx);
                     
-                    // Process paragraphs in each section
                     for (int i = 0; i < section.numParagraphs(); i++) {
                         Paragraph docParagraph = section.getParagraph(i);
                         XWPFParagraph docxParagraph = docx.createParagraph();
                         
-                        // Set paragraph style
+                        // Set default alignment to left for all paragraphs
+                        docxParagraph.setAlignment(ParagraphAlignment.LEFT);
+                        
+                        // Handle heading style
+                        if (isHeading(docParagraph)) {
+                            setHeadingStyle(docxParagraph);
+                        }
+                        
                         setParagraphStyle(docParagraph, docxParagraph);
                         
-                        // Handle bullet points and numbering
-                        if (docParagraph.isInList()) {
+                        // Handle lists and bullet points
+                        if (docParagraph.isInList() || startsWithArrow(docParagraph.text())) {
                             handleListFormatting(docParagraph, docxParagraph);
                         }
                         
-                        // Process character runs (text with formatting)
-                        for (int j = 0; j < docParagraph.numCharacterRuns(); j++) {
-                            CharacterRun docRun = docParagraph.getCharacterRun(j);
-                            String text = docRun.text();
-                            
-                            if (text.trim().length() > 0) {
-                                XWPFRun docxRun = docxParagraph.createRun();
-                                setRunProperties(docRun, docxRun, text);
-                            }
-                        }
+                        // Process text and formatting
+                        processCharacterRuns(docParagraph, docxParagraph);
                     }
                 }
                 
@@ -86,12 +84,9 @@ public class DocConverterService {
                 byte[] docxBytes = docxOutputStream.toByteArray();
                 return Base64.getEncoder().encodeToString(docxBytes);
             }
-        } catch (IllegalArgumentException e) {
-            logger.error("Failed to decode base64 content", e);
-            throw new IllegalArgumentException("Failed to decode base64 content: " + e.getMessage());
-        } catch (IOException e) {
-            logger.error("Failed to process document", e);
-            throw new IOException("Failed to process document: " + e.getMessage());
+        } catch (Exception e) {
+            logger.error("Failed to convert document", e);
+            throw new IOException("Failed to convert document: " + e.getMessage());
         }
     }
     
@@ -104,102 +99,195 @@ public class DocConverterService {
             sectPr.getPgMar() : 
             sectPr.addNewPgMar();
         
-        pageMar.setLeft(BigInteger.valueOf(DEFAULT_MARGIN));
-        // pageMar.setRight(BigInteger.valueOf(DEFAULT_MARGIN));
-        // pageMar.setTop(BigInteger.valueOf(DEFAULT_MARGIN));
-        // pageMar.setBottom(BigInteger.valueOf(DEFAULT_MARGIN));
+        // Set margins
+        pageMar.setLeft(BigInteger.valueOf(LEFT_MARGIN));
+        pageMar.setRight(BigInteger.valueOf(RIGHT_MARGIN));
+        pageMar.setTop(BigInteger.valueOf(DEFAULT_MARGIN));
+        pageMar.setBottom(BigInteger.valueOf(DEFAULT_MARGIN));
+        
+        // Set gutter margin to 0
+        pageMar.setGutter(BigInteger.ZERO);
+    }
+    
+    private boolean startsWithArrow(String text) {
+        return text.trim().startsWith("►") || text.trim().startsWith(">");
+    }
+    
+    private boolean isHeading(Paragraph paragraph) {
+        String text = paragraph.text().trim();
+        return text.endsWith(":-") || text.endsWith(":") || 
+               (text.length() > 0 && Character.isUpperCase(text.charAt(0)) && 
+                !text.contains(".") && text.length() < 50);
+    }
+    
+    private void setHeadingStyle(XWPFParagraph paragraph) {
+        paragraph.setSpacingBefore(HEADING_SPACING);
+        paragraph.setSpacingAfter(200);
+        
+        // Set bottom border for headings
+        paragraph.setBorderBottom(Borders.SINGLE);
+        
+        // Create heading run with proper formatting
+        XWPFRun run = paragraph.createRun();
+        run.setBold(true);
+        run.setFontSize(12);
+        run.setFontFamily("Times New Roman");
+    }
+    
+    private void processCharacterRuns(Paragraph docParagraph, XWPFParagraph docxParagraph) {
+        String paragraphText = docParagraph.text().trim();
+        boolean isArrowBullet = startsWithArrow(paragraphText);
+        
+        for (int j = 0; j < docParagraph.numCharacterRuns(); j++) {
+            CharacterRun docRun = docParagraph.getCharacterRun(j);
+            String text = docRun.text();
+            
+            if (text.trim().length() > 0) {
+                if (isArrowBullet && j == 0) {
+                    // Handle arrow bullet point
+                    XWPFRun bulletRun = docxParagraph.createRun();
+                    bulletRun.setText(ARROW_BULLET + " ");
+                    bulletRun.setFontFamily("Symbol");
+                    bulletRun.setFontSize(10);
+                    
+                    // Create another run for the actual text
+                    XWPFRun textRun = docxParagraph.createRun();
+                    setRunProperties(docRun, textRun, text.replaceFirst("^[►>]\\s*", ""));
+                } else if (text.contains("@") && text.contains(".")) {
+                    createEmailLink(docxParagraph, text);
+                } else {
+                    XWPFRun docxRun = docxParagraph.createRun();
+                    setRunProperties(docRun, docxRun, text);
+                }
+            }
+        }
+    }
+    
+    private void createEmailLink(XWPFParagraph paragraph, String email) {
+        XWPFRun run = paragraph.createRun();
+        run.setText(email);
+        run.setUnderline(UnderlinePatterns.SINGLE);
+        run.setColor("0000FF"); // Blue color
+        run.setFontFamily("Times New Roman");
+        run.setFontSize(11);
     }
     
     private void setParagraphStyle(Paragraph docParagraph, XWPFParagraph docxParagraph) {
-        // Basic alignment
-        docxParagraph.setAlignment(convertAlignment(docParagraph.getJustification()));
+        // Always set left alignment as default
+        docxParagraph.setAlignment(ParagraphAlignment.LEFT);
         
         // Spacing
         docxParagraph.setSpacingBefore(docParagraph.getSpacingBefore());
         docxParagraph.setSpacingAfter(docParagraph.getSpacingAfter());
         
         // Line spacing
-        LineSpacingDescriptor spacing = docParagraph.getLineSpacing();
-        if (spacing != null) {
-            docxParagraph.setSpacingLineRule(LineSpacingRule.AUTO);
-            docxParagraph.setSpacingBetween(1.15); // Default spacing
-        }
+        docxParagraph.setSpacingLineRule(LineSpacingRule.EXACT);
+        docxParagraph.setSpacingBetween(1.15);
         
-        // Indentation
+        // Reset any existing indentation
+        docxParagraph.setIndentationLeft(0);
+        docxParagraph.setIndentationRight(0);
+        docxParagraph.setFirstLineIndent(0);
+        
+        // Only set indentation if specifically needed
         int leftIndent = docParagraph.getIndentFromLeft();
         int rightIndent = docParagraph.getIndentFromRight();
         int firstLineIndent = docParagraph.getFirstLineIndent();
-        docxParagraph.setIndentationLeft(leftIndent);
-        docxParagraph.setIndentationRight(rightIndent);
-        docxParagraph.setFirstLineIndent(firstLineIndent);
+        
+        if (leftIndent > 0) {
+            docxParagraph.setIndentationLeft(leftIndent);
+        }
+        if (rightIndent > 0) {
+            docxParagraph.setIndentationRight(rightIndent);
+        }
+        if (firstLineIndent != 0) {
+            docxParagraph.setFirstLineIndent(firstLineIndent);
+        }
+        
+        // Set borders based on the original paragraph's borders
+        BorderCode topBorder = docParagraph.getTopBorder();
+        BorderCode bottomBorder = docParagraph.getBottomBorder();
+        BorderCode leftBorder = docParagraph.getLeftBorder();
+        BorderCode rightBorder = docParagraph.getRightBorder();
+        
+        // Convert border styles
+        if (topBorder != null && topBorder.getBorderType() > 0) {
+            docxParagraph.setBorderTop(Borders.SINGLE);
+        }
+        if (bottomBorder != null && bottomBorder.getBorderType() > 0) {
+            docxParagraph.setBorderBottom(Borders.SINGLE);
+        }
+        if (leftBorder != null && leftBorder.getBorderType() > 0) {
+            docxParagraph.setBorderLeft(Borders.SINGLE);
+        }
+        if (rightBorder != null && rightBorder.getBorderType() > 0) {
+            docxParagraph.setBorderRight(Borders.SINGLE);
+        }
     }
     
     private void handleListFormatting(Paragraph docParagraph, XWPFParagraph docxParagraph) {
+        // Check if it's an arrow bullet point
+        if (startsWithArrow(docParagraph.text())) {
+            docxParagraph.setIndentationLeft(360); // 0.25 inch
+            return; // Skip regular list formatting
+        }
+        
         int level = docParagraph.getIlvl();
         
         if (level >= 0) {
+            // Set numbering
             BigInteger numId = BigInteger.valueOf(1);
             docxParagraph.setNumID(numId);
             docxParagraph.setNumILvl(BigInteger.valueOf(level));
             
+            // Add proper indentation for lists
+            docxParagraph.setIndentationLeft(720); // 0.5 inch
+            if (level > 0) {
+                docxParagraph.setIndentationLeft(720 * (level + 1));
+            }
+            
+            // Set list style
             if (level == 0) {
-                docxParagraph.setStyle("ListBullet");
-            } else {
                 docxParagraph.setStyle("ListNumber");
+            } else {
+                docxParagraph.setStyle("ListBullet");
             }
         }
     }
     
     private void setRunProperties(CharacterRun docRun, XWPFRun docxRun, String text) {
-        // Set text
         docxRun.setText(text);
+        
+        // Font settings
+        docxRun.setFontFamily("Times New Roman");
+        docxRun.setFontSize(docRun.getFontSize() / 2);
         
         // Basic formatting
         docxRun.setBold(docRun.isBold());
         docxRun.setItalic(docRun.isItalic());
         docxRun.setStrike(docRun.isStrikeThrough());
         
-        // Handle subscript/superscript
-        int scriptIndex = docRun.getSubSuperScriptIndex();
-        if (scriptIndex == 1) {
-            docxRun.setVerticalAlignment(VerticalAlign.SUBSCRIPT.toString());
-        } else if (scriptIndex == 2) {
-            docxRun.setVerticalAlignment(VerticalAlign.SUPERSCRIPT.toString());
+        // Vertical alignment
+        if (docRun.getSubSuperScriptIndex() == 1) {
+            docxRun.setVerticalAlignment("subscript");
+        } else if (docRun.getSubSuperScriptIndex() == 2) {
+            docxRun.setVerticalAlignment("superscript");
         }
         
-        // Font properties
-        docxRun.setFontSize(docRun.getFontSize() / 2);
-        docxRun.setFontFamily(docRun.getFontName());
-        
-        // Underline
+        // Underline - preserve original underline if it exists
         if (docRun.getUnderlineCode() != 0) {
             docxRun.setUnderline(convertUnderline(docRun.getUnderlineCode()));
         }
         
-        // Text color
+        // Text color - preserve original color
         int color = docRun.getColor();
         if (color != -1) {
             docxRun.setColor(String.format("%06X", color));
         }
         
-        // Text effects
-        docxRun.setEmbossed(docRun.isEmbossed());
-        docxRun.setImprinted(docRun.isImprinted());
-        docxRun.setShadow(docRun.isShadowed());
-        
         // Character spacing
         if (docRun.getKerning() != 0) {
             docxRun.setKerning(docRun.getKerning());
-        }
-    }
-    
-    private ParagraphAlignment convertAlignment(int justification) {
-        switch (justification) {
-            case 1: return ParagraphAlignment.LEFT;
-            case 2: return ParagraphAlignment.CENTER;
-            case 3: return ParagraphAlignment.RIGHT;
-            case 4: return ParagraphAlignment.BOTH;
-            default: return ParagraphAlignment.LEFT;
         }
     }
     
